@@ -1,0 +1,39 @@
+{
+  "mysql": {
+    "host": "localhost",
+    "port": 3306,
+    "user": "root",
+    "password": "your_password",
+    "database": "your_database",
+    "charset": "utf8mb4",
+    "connect_timeout": 30
+  },
+  "output": {
+    "dir": "./output",
+    "watermark_dir": "./watermark"
+  },
+  "log": {
+    "dir": "./logs",
+    "level": "INFO"
+  },
+  "extract": {
+    "batch_size": 10000
+  },
+  "tables": [
+    {
+      "name": "user_info",
+      "increment_mode": "timestamp",
+      "increment_column": "create_time",
+      "batch_size": 10000
+    },
+    {
+      "name": "order_info",
+      "increment_mode": "primary_key",
+      "increment_column": "order_id"
+    },
+    {
+      "name": "dict_data",
+      "increment_mode": "full"
+    }
+  ]
+}
