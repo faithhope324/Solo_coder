@@ -22,6 +22,8 @@ class IncrementalExtractor:
     
     SLOW_QUERY_THRESHOLD_SECONDS = 10.0
     
+    NULL_PLACEHOLDER = '\\N'
+    
     def __init__(self, mysql_client: MySQLClient, 
                  table_name: str,
                  increment_mode: str = INCREMENT_MODE_TIMESTAMP,
@@ -144,7 +146,7 @@ class IncrementalExtractor:
             格式化后的字符串
         """
         if value is None:
-            return ''
+            return self.NULL_PLACEHOLDER
         
         data_type = col_info['DATA_TYPE'].lower()
         
@@ -156,11 +158,20 @@ class IncrementalExtractor:
             else:
                 return self._escape_special_chars(value)
         elif data_type in ['tinyint', 'smallint', 'int', 'integer', 'bigint']:
-            return str(int(value))
+            try:
+                return str(int(value))
+            except (TypeError, ValueError):
+                return self.NULL_PLACEHOLDER
         elif data_type in ['float', 'double', 'decimal']:
-            return str(float(value))
+            try:
+                return str(float(value))
+            except (TypeError, ValueError):
+                return self.NULL_PLACEHOLDER
         else:
-            return self._escape_special_chars(value)
+            result = self._escape_special_chars(value)
+            if result == '' and col_info.get('IS_NULLABLE') == 'NO':
+                return ''
+            return result
     
     def _write_to_csv(self, rows: List[Dict[str, Any]], 
                        output_file: Path, 
@@ -340,6 +351,20 @@ class IncrementalExtractor:
         
         return str(max_val)
     
+    def _cleanup_temp_file(self, file_path: Path):
+        """
+        清理临时文件
+        
+        Args:
+            file_path: 文件路径
+        """
+        try:
+            if file_path.exists():
+                file_path.unlink()
+                self.logger.warning(f"已清理临时文件: {file_path}")
+        except Exception as e:
+            self.logger.warning(f"清理临时文件失败: {file_path}, 错误: {e}")
+    
     def extract(self, business_date: str = None, 
                 start_watermark: str = None,
                 end_watermark: str = None,
@@ -355,6 +380,9 @@ class IncrementalExtractor:
             
         Returns:
             抽取结果统计
+            
+        Raises:
+            Exception: 抽取过程中发生异常时抛出
         """
         if business_date is None:
             business_date = datetime.now().strftime('%Y-%m-%d')
@@ -381,6 +409,7 @@ class IncrementalExtractor:
         self.logger.info(f"结束水印: {end_watermark}")
         
         output_file = self.output_dir / f'{self.table_name}_{business_date}.csv'
+        
         if output_file.exists():
             output_file.unlink()
             self.logger.info(f"删除已存在的输出文件: {output_file}")
@@ -389,57 +418,66 @@ class IncrementalExtractor:
         offset = 0
         batch_count = 0
         current_max_watermark = start_watermark
+        has_error = False
         
-        while True:
-            batch_count += 1
-            
-            if self.increment_mode == self.INCREMENT_MODE_FULL:
-                column_names = ', '.join([f'`{col}`' for col in self._get_column_names()])
-                primary_keys = self._get_primary_keys()
-                if primary_keys:
-                    order_by = ', '.join([f'`{pk}`' for pk in primary_keys])
-                    sql = f"SELECT {column_names} FROM `{self.table_name}` ORDER BY {order_by} LIMIT %s, %s"
+        try:
+            while True:
+                batch_count += 1
+                
+                if self.increment_mode == self.INCREMENT_MODE_FULL:
+                    column_names = ', '.join([f'`{col}`' for col in self._get_column_names()])
+                    primary_keys = self._get_primary_keys()
+                    if primary_keys:
+                        order_by = ', '.join([f'`{pk}`' for pk in primary_keys])
+                        sql = f"SELECT {column_names} FROM `{self.table_name}` ORDER BY {order_by} LIMIT %s, %s"
+                    else:
+                        sql = f"SELECT {column_names} FROM `{self.table_name}` LIMIT %s, %s"
+                    params = (offset, self.batch_size)
                 else:
-                    sql = f"SELECT {column_names} FROM `{self.table_name}` LIMIT %s, %s"
-                params = (offset, self.batch_size)
-            else:
-                sql, params = self._build_increment_query(
-                    start_watermark, end_watermark, offset, self.batch_size
-                )
+                    sql, params = self._build_increment_query(
+                        start_watermark, end_watermark, offset, self.batch_size
+                    )
+                
+                self.logger.info(f"开始第 {batch_count} 批抽取 (offset={offset})")
+                
+                try:
+                    rows = self._fetch_batch(sql, params)
+                except Exception as e:
+                    self.logger.error(f"第 {batch_count} 批抽取失败: {e}")
+                    has_error = True
+                    raise
+                
+                batch_size = len(rows)
+                total_rows += batch_size
+                
+                self.logger.info(f"第 {batch_count} 批获取 {batch_size} 条记录")
+                
+                if batch_size == 0:
+                    break
+                
+                if self.increment_mode != self.INCREMENT_MODE_FULL:
+                    batch_max = self._get_batch_max_watermark(rows)
+                    if batch_max:
+                        current_max_watermark = batch_max
+                
+                written = self._write_to_csv(rows, output_file, is_append=total_rows > batch_size)
+                self.logger.info(f"第 {batch_count} 批写入 {written} 条记录到 {output_file}")
+                
+                if batch_size < self.batch_size:
+                    break
+                
+                offset += self.batch_size
             
-            self.logger.info(f"开始第 {batch_count} 批抽取 (offset={offset})")
-            
-            try:
-                rows = self._fetch_batch(sql, params)
-            except Exception as e:
-                self.logger.error(f"第 {batch_count} 批抽取失败: {e}")
-                raise
-            
-            batch_size = len(rows)
-            total_rows += batch_size
-            
-            self.logger.info(f"第 {batch_count} 批获取 {batch_size} 条记录")
-            
-            if batch_size == 0:
-                break
-            
-            if self.increment_mode != self.INCREMENT_MODE_FULL:
-                batch_max = self._get_batch_max_watermark(rows)
-                if batch_max:
-                    current_max_watermark = batch_max
-            
-            written = self._write_to_csv(rows, output_file, is_append=total_rows > batch_size)
-            self.logger.info(f"第 {batch_count} 批写入 {written} 条记录到 {output_file}")
-            
-            if batch_size < self.batch_size:
-                break
-            
-            offset += self.batch_size
+            if total_rows > 0 and self.increment_mode != self.INCREMENT_MODE_FULL:
+                final_watermark = end_watermark if end_watermark else current_max_watermark
+                if final_watermark:
+                    self._write_watermark(final_watermark)
         
-        if total_rows > 0 and self.increment_mode != self.INCREMENT_MODE_FULL:
-            final_watermark = end_watermark if end_watermark else current_max_watermark
-            if final_watermark:
-                self._write_watermark(final_watermark)
+        except Exception as e:
+            has_error = True
+            self._cleanup_temp_file(output_file)
+            self.logger.error(f"抽取过程发生异常，已清理临时文件: {e}")
+            raise
         
         result = {
             'table_name': self.table_name,

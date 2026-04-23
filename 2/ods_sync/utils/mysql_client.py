@@ -36,14 +36,45 @@ class MySQLClient:
         self.logger = logger or logging.getLogger(__name__)
         self._connection = None
     
+    def _ping_connection(self, conn: pymysql.connections.Connection) -> bool:
+        """
+        检测连接是否真正可用（心跳检测）
+        
+        Args:
+            conn: 连接对象
+            
+        Returns:
+            True: 连接可用, False: 连接已失效
+        """
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT 1")
+                cursor.fetchone()
+            return True
+        except Exception:
+            return False
+    
     def _get_connection(self) -> pymysql.connections.Connection:
         """
-        获取数据库连接
+        获取数据库连接（包含假连接检测）
         
         Returns:
             pymysql连接对象
         """
-        if self._connection is None or not self._connection.open:
+        need_reconnect = True
+        
+        if self._connection is not None and self._connection.open:
+            if self._ping_connection(self._connection):
+                need_reconnect = False
+            else:
+                self.logger.warning("检测到假连接，尝试重新连接...")
+                try:
+                    self._connection.close()
+                except Exception:
+                    pass
+                self._connection = None
+        
+        if need_reconnect:
             self.logger.info(f"连接到MySQL: {self.host}:{self.port}/{self.database}")
             self._connection = pymysql.connect(
                 host=self.host,
@@ -55,6 +86,7 @@ class MySQLClient:
                 connect_timeout=self.connect_timeout,
                 cursorclass=DictCursor
             )
+        
         return self._connection
     
     def close(self):
