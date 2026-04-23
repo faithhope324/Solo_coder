@@ -75,15 +75,27 @@ def validate_date(date_str: str) -> str:
         
     Returns:
         标准化后的日期字符串 (YYYY-MM-DD)
+        
+    Raises:
+        ValueError: 日期格式错误或业务日期大于当前日期
     """
+    today = datetime.now().strftime('%Y-%m-%d')
+    today_date = datetime.strptime(today, '%Y-%m-%d')
+    
     if not date_str:
-        return datetime.now().strftime('%Y-%m-%d')
+        return today
     
     try:
         parsed_date = datetime.strptime(date_str, '%Y-%m-%d')
-        return parsed_date.strftime('%Y-%m-%d')
     except ValueError as e:
         raise ValueError(f"日期格式错误: {date_str}，正确格式应为 YYYY-MM-DD") from e
+    
+    if parsed_date > today_date:
+        raise ValueError(
+            f"业务日期 {date_str} 不能大于当前日期 {today}"
+        )
+    
+    return parsed_date.strftime('%Y-%m-%d')
 
 
 def get_table_list(config: SyncConfig, specified_tables: Optional[str]) -> List[Dict[str, Any]]:

@@ -3,6 +3,7 @@ MySQL增量抽取器模块 - 支持时间戳和主键ID两种增量方式
 """
 import os
 import csv
+import time
 import logging
 from datetime import datetime, date
 from typing import List, Dict, Any, Optional, Tuple
@@ -18,6 +19,8 @@ class IncrementalExtractor:
     INCREMENT_MODE_TIMESTAMP = 'timestamp'
     INCREMENT_MODE_PRIMARY_KEY = 'primary_key'
     INCREMENT_MODE_FULL = 'full'
+    
+    SLOW_QUERY_THRESHOLD_SECONDS = 10.0
     
     def __init__(self, mysql_client: MySQLClient, 
                  table_name: str,
@@ -105,6 +108,30 @@ class IncrementalExtractor:
         
         self.logger.info(f"写入水印: {watermark}")
     
+    def _escape_special_chars(self, value: str) -> str:
+        """
+        转义特殊字符，确保CSV格式正确
+        
+        Args:
+            value: 原始字符串
+            
+        Returns:
+            转义后的字符串
+        """
+        if value is None:
+            return ''
+        
+        value = str(value)
+        
+        value = value.replace('\r\n', ' ')
+        value = value.replace('\n', ' ')
+        value = value.replace('\r', ' ')
+        value = value.replace('\t', ' ')
+        
+        value = ' '.join(value.split())
+        
+        return value
+    
     def _format_value(self, value: Any, col_info: Dict[str, Any]) -> str:
         """
         格式化值为字符串（用于CSV输出）
@@ -127,13 +154,13 @@ class IncrementalExtractor:
             elif isinstance(value, date):
                 return value.strftime('%Y-%m-%d')
             else:
-                return str(value)
+                return self._escape_special_chars(value)
         elif data_type in ['tinyint', 'smallint', 'int', 'integer', 'bigint']:
             return str(int(value))
         elif data_type in ['float', 'double', 'decimal']:
             return str(float(value))
         else:
-            return str(value)
+            return self._escape_special_chars(value)
     
     def _write_to_csv(self, rows: List[Dict[str, Any]], 
                        output_file: Path, 
@@ -178,7 +205,7 @@ class IncrementalExtractor:
     @mysql_retry(max_attempts=5, wait_seconds=2.0)
     def _fetch_batch(self, sql: str, params: Optional[Tuple] = None) -> List[Dict[str, Any]]:
         """
-        批量获取数据（带重试）
+        批量获取数据（带重试和慢查询告警）
         
         Args:
             sql: SQL语句
@@ -187,7 +214,26 @@ class IncrementalExtractor:
         Returns:
             数据行列表
         """
-        return self.mysql_client.execute_query(sql, params)
+        start_time = time.time()
+        
+        try:
+            result = self.mysql_client.execute_query(sql, params)
+            
+            elapsed = time.time() - start_time
+            
+            if elapsed >= self.SLOW_QUERY_THRESHOLD_SECONDS:
+                self.logger.warning(
+                    f"慢查询告警: 表 {self.table_name}, "
+                    f"耗时 {elapsed:.2f} 秒 (阈值: {self.SLOW_QUERY_THRESHOLD_SECONDS} 秒)"
+                )
+            else:
+                self.logger.debug(f"批次查询耗时: {elapsed:.2f} 秒")
+            
+            return result
+        except Exception as e:
+            elapsed = time.time() - start_time
+            self.logger.debug(f"查询失败，耗时: {elapsed:.2f} 秒")
+            raise
     
     def _build_increment_query(self, start_watermark: Optional[str], 
                                 end_watermark: Optional[str],
