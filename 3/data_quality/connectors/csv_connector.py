@@ -50,8 +50,9 @@ class CSVConnector(BaseConnector):
     def get_duplicate_count(self, table_name: str, primary_key: str) -> int:
         if self._df is None:
             self.connect()
-        duplicate_groups = self._df.groupby(primary_key).size()
-        duplicate_count = len(duplicate_groups[duplicate_groups > 1])
+        total_count = len(self._df)
+        unique_count = self._df[primary_key].nunique()
+        duplicate_count = total_count - unique_count
         return duplicate_count
 
     def execute_query(self, query: str) -> Any:

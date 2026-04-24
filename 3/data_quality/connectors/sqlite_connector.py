@@ -32,15 +32,13 @@ class SQLiteConnector(BaseConnector):
 
     def get_duplicate_count(self, table_name: str, primary_key: str) -> int:
         query = f"""
-            SELECT COUNT(*) FROM (
-                SELECT {primary_key} FROM {table_name}
-                GROUP BY {primary_key}
-                HAVING COUNT(*) > 1
-            ) AS duplicates
+            SELECT COUNT(*) - COUNT(DISTINCT {primary_key}) 
+            FROM {table_name}
         """
         cursor = self._connection.cursor()
         cursor.execute(query)
-        return cursor.fetchone()[0]
+        result = cursor.fetchone()[0]
+        return result if result is not None else 0
 
     def execute_query(self, query: str) -> Any:
         cursor = self._connection.cursor()

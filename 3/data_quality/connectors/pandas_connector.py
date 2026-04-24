@@ -32,8 +32,9 @@ class PandasConnector(BaseConnector):
 
     def get_duplicate_count(self, table_name: str, primary_key: str) -> int:
         df = self.get_dataframe(table_name)
-        duplicate_groups = df.groupby(primary_key).size()
-        duplicate_count = len(duplicate_groups[duplicate_groups > 1])
+        total_count = len(df)
+        unique_count = df[primary_key].nunique()
+        duplicate_count = total_count - unique_count
         return duplicate_count
 
     def execute_query(self, query: str) -> Any:

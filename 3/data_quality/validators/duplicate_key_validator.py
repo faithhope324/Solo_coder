@@ -43,13 +43,13 @@ class DuplicateKeyValidator(BaseValidator):
                 details = {
                     "total_rows": total_rows,
                     "primary_key": primary_key,
-                    "duplicate_groups_count": duplicate_count,
+                    "duplicate_records_count": duplicate_count,
                 }
 
                 if duplicate_count == 0:
                     return self._create_result(
                         status=CheckStatus.PASS,
-                        message=f"No duplicate keys found for primary key '{primary_key}'",
+                        message=f"No duplicate records found for primary key '{primary_key}'",
                         actual_value=0,
                         expected_value=0,
                         details=details,
@@ -57,7 +57,7 @@ class DuplicateKeyValidator(BaseValidator):
                 else:
                     return self._create_result(
                         status=CheckStatus.FAIL,
-                        message=f"Found {duplicate_count} duplicate key groups for primary key '{primary_key}'",
+                        message=f"Found {duplicate_count} duplicate records for primary key '{primary_key}'",
                         actual_value=duplicate_count,
                         expected_value=0,
                         details=details,

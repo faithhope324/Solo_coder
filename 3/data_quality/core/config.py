@@ -56,6 +56,7 @@ class ReportConfig:
     include_passed_checks: bool = True
     include_charts: bool = True
     template: str = "default"
+    use_timestamp: bool = False
 
 
 @dataclass

@@ -19,19 +19,24 @@ class ReportGenerator:
         if not results:
             raise ValueError("No check results to generate report from")
 
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         output_format = self.report_config.output_format.lower()
         base_path = output_path or self.report_config.output_path
 
         os.makedirs(base_path, exist_ok=True)
 
+        if self.report_config.use_timestamp:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename_base = f"data_quality_report_{timestamp}"
+        else:
+            filename_base = "data_quality_report"
+
         if output_format == "html":
-            file_path = os.path.join(base_path, f"data_quality_report_{timestamp}.html")
+            file_path = os.path.join(base_path, f"{filename_base}.html")
             content = self._generate_html(results, summary)
             with open(file_path, "w", encoding="utf-8") as f:
                 f.write(content)
         elif output_format == "json":
-            file_path = os.path.join(base_path, f"data_quality_report_{timestamp}.json")
+            file_path = os.path.join(base_path, f"{filename_base}.json")
             content = self._generate_json(results, summary)
             with open(file_path, "w", encoding="utf-8") as f:
                 json.dump(content, f, ensure_ascii=False, indent=2)
