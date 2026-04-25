@@ -1,0 +1,44 @@
+# ODS层数据同步配置文件示例
+# 支持YAML和JSON两种格式
+
+# MySQL连接配置
+mysql:
+  host: "localhost"
+  port: 3306
+  user: "root"
+  password: "your_password"
+  database: "your_database"
+  charset: "utf8mb4"
+  connect_timeout: 30
+
+# 输出配置
+output:
+  dir: "./output"                    # 数据输出目录
+  watermark_dir: "./watermark"       # 水印文件目录
+
+# 日志配置
+log:
+  dir: "./logs"                       # 日志文件目录
+  level: "INFO"                       # 日志级别: DEBUG, INFO, WARNING, ERROR
+
+# 抽取配置
+extract:
+  batch_size: 10000                   # 每批抽取的记录数
+
+# 表配置列表
+tables:
+  # 示例1: 基于时间戳的增量抽取
+  - name: "user_info"
+    increment_mode: "timestamp"       # 增量模式: timestamp, primary_key, full
+    increment_column: "create_time"   # 增量列名（时间戳列）
+    batch_size: 10000                 # 可选：覆盖全局批处理大小
+
+  # 示例2: 基于主键ID的增量抽取
+  - name: "order_info"
+    increment_mode: "primary_key"     # 基于自增主键ID的增量
+    increment_column: "order_id"      # 主键列名（必须是自增或有序的）
+
+  # 示例3: 全量抽取
+  - name: "dict_data"
+    increment_mode: "full"            # 全量抽取模式
+    # increment_column: ""            # 全量模式不需要增量列
